@@ -1,36 +1,36 @@
-// The token radar's model, radar-2: one snap of the protocol universe in, one ranked ranked out.
+// The token radar's model, radar-2: one snapshot of the protocol universe in, one ranked board out.
 //
-// The ranked ranks EVERY protocol in the snap that passes the house's own pre-token test,
-// applied to the whole snap rather than only above the watchlist floor. A protocol is
+// The board ranks EVERY protocol in the snapshot that passes the house's own pre-token test,
+// applied to the whole snapshot rather than only above the watchlist floor. A protocol is
 // rankable when its record carries no token (no market cap, no CoinGecko id, no symbol) and
 // it is not a wrapped, staked or bridged product of a token that already trades: its category
 // is not CEX, Bridge, Canonical Bridge, Liquid Staking, Liquid Restaking or Restaked BTC, its
 // name carries no whole word wrapped / staked / staking, does not end in a version marker and
 // does not begin with an exchange's name. That is the watchlist's rule, read from the fields
-// the snap actually carries (parentProtocol is not one of them, so it cannot be tested).
-// The 40 watchlist protocols all pass it; the ranked adds every other protocol that does,
+// the snapshot actually carries (parentProtocol is not one of them, so it cannot be tested).
+// The 40 watchlist protocols all pass it; the board adds every other protocol that does,
 // above and below the floor, with no TVL cutoff at all. Protocols that fail it — exchanges,
 // bridges, liquid-staking receipts, versioned pools — are set aside with the live-token
-// protocols, never mixed into the ranked ranked.
+// protocols, never mixed into the ranked board.
 //
-// Implied value follows only from the snap's own figures:
+// Implied value follows only from the snapshot's own figures:
 //
 //   multiple   = median mcap/TVL of the live-token protocols in the same category
-//                (at least 3 with a market cap, else the fallbackMultiple median), clamped to [0.05, 0.50]
+//                (at least 3 with a market cap, else the overallMultiple median), clamped to [0.05, 0.50]
 //   base       = tvl_usd x multiple
 //   growth     = clamp(change_7d, -60, 120) per cent
 //   growthMult = 1 + (growth / 100) x 0.5
-//   maturity   = 0.6 + min(age_days, 1460) / 1460 x 0.4   (age unknown: the snap's own
+//   maturity   = 0.6 + min(age_days, 1460) / 1460 x 0.4   (age unknown: the snapshot's own
 //                median age of pre-token protocols with a listed date)
 //   implied    = max(1, round(base x growthMult x maturity))
 //
-// The multiple is the market's own valuation of a category's TVL: the snap's live-token
+// The multiple is the market's own valuation of a category's TVL: the snapshot's live-token
 // protocols show what a dollar of TVL is worth as market cap, per category. Lending TVL
 // trades near 0.13x, Dexs near 0.34x, RWA near 0.28x; the flat 0.25x of the starter treats
 // them all the same. No protocol name is ever special-cased: the same function scores
-// every row, and every constant the dashboard states can be recomputed from the snap.
+// every row, and every constant the dashboard states can be recomputed from the snapshot.
 
-/** The snap's protocol entry: exactly the ten fields the sealed input carries. */
+/** The snapshot's protocol entry: exactly the ten fields the sealed input carries. */
 export interface SnapshotProtocol {
   slug: string;
   name: string;
@@ -44,7 +44,7 @@ export interface SnapshotProtocol {
   symbol: string | null;
 }
 
-/** The whole snap document. */
+/** The whole snapshot document. */
 export interface Snapshot {
   as_of: string;
   source: string;
@@ -91,7 +91,7 @@ export interface FarmStep {
   time: string;
 }
 
-/** One row of ranked.json: the ranked ranked's row. */
+/** One row of board.json: the ranked board's row. */
 export interface BoardRow {
   rank: number;
   slug: string;
@@ -135,7 +135,7 @@ export interface RadarRow {
   maturity_multiplier: number;
 }
 
-/** A live-token protocol: it already trades, so the ranked shows the market's own value, not a model's. */
+/** A live-token protocol: it already trades, so the board shows the market's own value, not a model's. */
 export interface LiveRow {
   slug: string;
   name: string;
@@ -146,7 +146,7 @@ export interface LiveRow {
   change_7d: number | null;
 }
 
-/** Everything the dashboard needs: the ranked, the live set, and the model it runs. */
+/** Everything the dashboard needs: the board, the live set, and the model it runs. */
 export interface RadarData {
   as_of: string;
   source: string;
@@ -165,7 +165,7 @@ export interface RadarData {
   live: LiveRow[];
 }
 
-/** Why the snap is not one this model can score. */
+/** Why the snapshot is not one this model can score. */
 export class SnapshotError extends Error {
   constructor(message: string) {
     super(message);
@@ -202,19 +202,19 @@ function clampMultiple(v: number, model: ModelConstants): number {
 }
 
 /**
- * The market's valuation of a category's TVL, from the snap alone: the median
+ * The market's valuation of a category's TVL, from the snapshot alone: the median
  * mcap/TVL of the live-token protocols in that category that carry a market cap.
  * Categories with fewer than `multiple_min_samples` live samples fall back to the
- * fallbackMultiple median across all live-token protocols with a market cap. The result is
+ * overallMultiple median across all live-token protocols with a market cap. The result is
  * clamped to the model's band, so a three-protocol sample cannot explode a value.
  */
 export function categoryMultiples(
-  snap: Snapshot,
+  shot: Snapshot,
   model: ModelConstants,
-): { categoryMultiple: Record<string, number>; fallbackMultiple: number } {
+): { catMultiple: Record<string, number>; overallMultiple: number } {
   const byCat = new Map<string, number[]>();
   const all: number[] = [];
-  for (const p of snap.protocols) {
+  for (const p of shot.protocols) {
     if (p.mcap_usd === null || p.mcap_usd <= 0 || p.tvl_usd <= 0) continue;
     if (p.gecko_id === null && p.symbol === null) continue;
     const ratio = p.mcap_usd / p.tvl_usd;
@@ -226,21 +226,21 @@ export function categoryMultiples(
     byCat.set(key, list);
   }
   all.sort((a, b) => a - b);
-  const fallbackMultiple = clampMultiple(median(all), model);
-  const categoryMultiple: Record<string, number> = {};
+  const overallMultiple = clampMultiple(median(all), model);
+  const catMultiple: Record<string, number> = {};
   for (const [key, list] of byCat) {
     list.sort((a, b) => a - b);
-    categoryMultiple[key] =
-      list.length >= model.multiple_min_samples ? clampMultiple(median(list), model) : fallbackMultiple;
+    catMultiple[key] =
+      list.length >= model.multiple_min_samples ? clampMultiple(median(list), model) : overallMultiple;
   }
-  return { categoryMultiple, fallbackMultiple };
+  return { catMultiple, overallMultiple };
 }
 
 /** The median age, in days, of the pre-token protocols that carry a listed date. */
-export function medianPreTokenAge(snap: Snapshot): number {
-  const ages = snap.protocols
+export function medianPreTokenAge(shot: Snapshot): number {
+  const ages = shot.protocols
     .filter((p) => isPreToken(p))
-    .map((p) => ageDays(snap.as_of, p.listed_at))
+    .map((p) => ageDays(shot.as_of, p.listed_at))
     .filter((a): a is number => a !== null)
     .sort((a, b) => a - b);
   return ages.length > 0 ? Math.round(median(ages)) : 365;
@@ -292,9 +292,9 @@ export function isPreToken(p: SnapshotProtocol): boolean {
 }
 
 /**
- * Whether a protocol is one the ranked may rank: pre-token, and not a wrapped, staked or
+ * Whether a protocol is one the board may rank: pre-token, and not a wrapped, staked or
  * bridged product of a token that already trades. This is the watchlist's own rule,
- * applied to the whole snap instead of only above its floor.
+ * applied to the whole snapshot instead of only above its floor.
  */
 export function isRankable(p: SnapshotProtocol): boolean {
   return (
@@ -306,7 +306,7 @@ export function isRankable(p: SnapshotProtocol): boolean {
   );
 }
 
-/** The snap's protocol by slug. */
+/** The snapshot's protocol by slug. */
 function bySlug(protocols: SnapshotProtocol[]): Map<string, SnapshotProtocol> {
   return new Map(protocols.map((p) => [p.slug, p]));
 }
@@ -319,45 +319,45 @@ export interface BoardSummary {
   live_size: number;
 }
 
-/** The protocols the ranked ranks, strongest first, with ranks 1..n. */
+/** The protocols the board ranks, strongest first, with ranks 1..n. */
 export function buildBoard(
-  snap: Snapshot,
+  shot: Snapshot,
   model: ModelConstants = MODEL,
 ): BoardRow[] {
-  const index = bySlug(snap.protocols);
-  const { categoryMultiple, fallbackMultiple } = categoryMultiples(snap, model);
-  const medianAge = medianPreTokenAge(snap);
-  const picked = new Map<string, SnapshotProtocol>();
-  // The watchlist is the floor: every slug, even one the snap no longer carries (it cannot, but the
-  // ranked's coverage is the gate's row and is never gambled on a missing record).
-  for (const slug of snap.watchlist) {
+  const index = bySlug(shot.protocols);
+  const { catMultiple, overallMultiple } = categoryMultiples(shot, model);
+  const medianAge = medianPreTokenAge(shot);
+  const selected = new Map<string, SnapshotProtocol>();
+  // The watchlist is the floor: every slug, even one the snapshot no longer carries (it cannot, but the
+  // board's coverage is the gate's row and is never gambled on a missing record).
+  for (const slug of shot.watchlist) {
     const p = index.get(slug);
-    if (p !== undefined) picked.set(slug, p);
+    if (p !== undefined) selected.set(slug, p);
   }
   // The early radar: every other protocol that passes the pre-token test, above and below the
-  // floor, with no TVL cutoff. A picked protocol stays picked.
-  for (const p of snap.protocols) {
-    if (!picked.has(p.slug) && isRankable(p)) picked.set(p.slug, p);
+  // floor, with no TVL cutoff. A selected protocol stays selected.
+  for (const p of shot.protocols) {
+    if (!selected.has(p.slug) && isRankable(p)) selected.set(p.slug, p);
   }
 
-  const scored = [...picked.values()].map((p) => {
-    // Round the multiple first: the ranked stores the rounded multiple, and the dashboard
+  const valued = [...selected.values()].map((p) => {
+    // Round the multiple first: the board stores the rounded multiple, and the dashboard
     // recomputes from it, so the two must use the identical number.
-    const multiple = roundTo4(categoryMultiple[p.category ?? 'Other'] ?? fallbackMultiple);
+    const multiple = round4dp(catMultiple[p.category ?? 'Other'] ?? overallMultiple);
     const { implied, growthPct, growthMult, maturityMult, age } = impliedValue(
       p,
-      snap.as_of,
+      shot.as_of,
       model,
       multiple,
       medianAge,
     );
     return { p, implied, growthPct, growthMult, maturityMult, age, multiple };
   });
-  scored.sort(
+  valued.sort(
     (a, b) =>
       b.implied - a.implied || (a.p.slug < b.p.slug ? -1 : a.p.slug > b.p.slug ? 1 : 0),
   );
-  return scored.map((s, i) => ({
+  return valued.map((s, i) => ({
     rank: i + 1,
     slug: s.p.slug,
     name: s.p.name,
@@ -373,17 +373,17 @@ export function buildBoard(
     age_days: s.age,
     implied_value_usd: s.implied,
     model: {
-      category_multiple: roundTo4(s.multiple),
+      category_multiple: round4dp(s.multiple),
       growth_pct: s.growthPct,
-      growth_multiplier: roundTo4(s.growthMult),
-      maturity_multiplier: roundTo4(s.maturityMult),
+      growth_multiplier: round4dp(s.growthMult),
+      maturity_multiplier: round4dp(s.maturityMult),
       age_days: s.age,
     },
     farm_steps: farmSteps(s.p, s.age, medianAge).map(stepText),
   }));
 }
 
-const roundTo4 = (n: number): number => Math.round(n * 1e4) / 1e4;
+const round4dp = (n: number): number => Math.round(n * 1e4) / 1e4;
 
 /** A step as one string: its action, then its cost and time, within the gate's 20..600 characters. */
 export function stepText(step: FarmStep): string {
@@ -505,8 +505,8 @@ export function farmSteps(p: SnapshotProtocol, age: number | null, medianAge: nu
 }
 
 /** The live-token protocols, by market cap, for the dashboard's Live token view. */
-export function liveRows(snap: Snapshot): LiveRow[] {
-  return snap.protocols
+export function liveRows(shot: Snapshot): LiveRow[] {
+  return shot.protocols
     .filter((p) => !isPreToken(p) && p.category !== 'CEX')
     .sort((a, b) => (b.mcap_usd ?? 0) - (a.mcap_usd ?? 0) || b.tvl_usd - a.tvl_usd)
     .slice(0, LIVE_ROWS)
@@ -521,7 +521,7 @@ export function liveRows(snap: Snapshot): LiveRow[] {
     }));
 }
 
-/** A ranked row's compact form for data.js, with the farm plan generated in the page. */
+/** A board row's compact form for data.js, with the farm plan generated in the page. */
 export function radarRow(row: BoardRow): RadarRow {
   return {
     rank: row.rank,
@@ -541,37 +541,37 @@ export function radarRow(row: BoardRow): RadarRow {
   };
 }
 
-/** Everything the dashboard renders, from the snap. */
+/** Everything the dashboard renders, from the snapshot. */
 export function buildRadar(
-  snap: Snapshot,
+  shot: Snapshot,
   model: ModelConstants = MODEL,
 ): { board: BoardRow[]; radar: RadarData } {
-  const ranked = buildBoard(snap, model);
-  const live = liveRows(snap);
-  const early = ranked.filter((r) => !snap.watchlist.includes(r.slug)).length;
-  const { categoryMultiple, fallbackMultiple } = categoryMultiples(snap, model);
-  const derivative = snap.protocols.filter((p) => isPreToken(p) && !isRankable(p)).length;
+  const ordered = buildBoard(shot, model);
+  const live = liveRows(shot);
+  const early = ordered.filter((r) => !shot.watchlist.includes(r.slug)).length;
+  const { catMultiple, overallMultiple } = categoryMultiples(shot, model);
+  const derivative = shot.protocols.filter((p) => isPreToken(p) && !isRankable(p)).length;
   const radar: RadarData = {
-    as_of: snap.as_of,
-    source: snap.source,
-    floor_usd: snap.floor_usd,
+    as_of: shot.as_of,
+    source: shot.source,
+    floor_usd: shot.floor_usd,
     model,
     model_version: MODEL_VERSION,
-    watchlist_size: snap.watchlist.length,
-    board_size: ranked.length,
+    watchlist_size: shot.watchlist.length,
+    board_size: ordered.length,
     early_size: early,
     live_size: live.length,
-    median_age_days: medianPreTokenAge(snap),
-    global_multiple: fallbackMultiple,
-    category_multiples: categoryMultiple,
+    median_age_days: medianPreTokenAge(shot),
+    global_multiple: overallMultiple,
+    category_multiples: catMultiple,
     derivative_set_aside: derivative,
-    rows: ranked.map(radarRow),
+    rows: ordered.map(radarRow),
     live,
   };
-  return { board: ranked, radar };
+  return { board: ordered, radar };
 }
 
-/** The snap out of a file's text, refused unless it is the shape the model scores. */
+/** The snapshot out of a file's text, refused unless it is the shape the model scores. */
 export function parseSnapshot(text: string): Snapshot {
   let raw: unknown;
   try {
@@ -614,18 +614,18 @@ export function parseSnapshot(text: string): Snapshot {
   };
 }
 
-/** Why a ranked is not one the gate will take, or null: coverage, ranks, order, one shared implied value, and farm steps. */
-export function boardIssue(ranked: BoardRow[], snap: Snapshot): string | null {
-  const slugs = new Set(ranked.map((r) => r.slug));
-  const missing = snap.watchlist.filter((s) => !slugs.has(s));
-  if (missing.length > 0) return `the ranked misses ${missing.length} watchlist slug${missing.length === 1 ? '' : 's'}: ${missing.slice(0, 5).join(', ')}`;
-  const ranks = ranked.map((r) => r.rank).sort((a, b) => a - b);
+/** Why a board is not one the gate will take, or null: coverage, ranks, order, one shared implied value, and farm steps. */
+export function boardIssue(ordered: BoardRow[], shot: Snapshot): string | null {
+  const slugs = new Set(ordered.map((r) => r.slug));
+  const missing = shot.watchlist.filter((s) => !slugs.has(s));
+  if (missing.length > 0) return `the board misses ${missing.length} watchlist slug${missing.length === 1 ? '' : 's'}: ${missing.slice(0, 5).join(', ')}`;
+  const ranks = ordered.map((r) => r.rank).sort((a, b) => a - b);
   for (let i = 0; i < ranks.length; i++) if (ranks[i] !== i + 1) return `rank ${i + 1} is ${ranks[i]}`;
-  for (let i = 1; i < ranked.length; i++) if (ranked[i]!.implied_value_usd > ranked[i - 1]!.implied_value_usd) return `row ${i + 1} outranks row ${i} on implied value`;
-  if (ranked.length >= 2 && ranked[0]!.implied_value_usd === ranked[ranked.length - 1]!.implied_value_usd) {
-    return `all ${ranked.length} rows share the same implied value $${ranked[0]!.implied_value_usd}: a ranked that ranks nothing by value is not a ranking`;
+  for (let i = 1; i < ordered.length; i++) if (ordered[i]!.implied_value_usd > ordered[i - 1]!.implied_value_usd) return `row ${i + 1} outranks row ${i} on implied value`;
+  if (ordered.length >= 2 && ordered[0]!.implied_value_usd === ordered[ordered.length - 1]!.implied_value_usd) {
+    return `all ${ordered.length} rows share the same implied value $${ordered[0]!.implied_value_usd}: a board that ranks nothing by value is not a ranking`;
   }
-  for (const r of ranked) {
+  for (const r of ordered) {
     const steps = r.farm_steps;
     if (steps.length < 3 || steps.length > 12) return `${r.slug} has ${steps.length} farm steps`;
     for (const s of steps) if (s.length < 20 || s.length > 600) return `${r.slug} has a farm step of ${s.length} characters`;
