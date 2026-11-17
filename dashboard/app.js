@@ -10,7 +10,9 @@
   var app = document.getElementById('board');
   var state = { q: '', category: 'all', chain: 'all', minTvl: 0, wlOnly: false, growth: 'all', tab: 'pre-token', sort: 'implied', dir: -1, selected: null };
   var WATCH = {};
-  (DATA.rows || []).forEach(function (r, i) { WATCH[r.slug] = i < DATA.watchlist_size; });
+  // Watchlist membership comes from the data, never from rank position: the
+  // first 40 rows by implied value are not the watchlist's 40.
+  (DATA.watchlist || []).forEach(function (s) { WATCH[s] = true; });
 
   var usd = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
   function fmtUsd(n) {

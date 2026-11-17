@@ -154,6 +154,8 @@ export interface RadarData {
   model: ModelConstants;
   model_version: string;
   watchlist_size: number;
+  /** The watchlist's slugs, so the page marks [W] by membership, never by rank position. */
+  watchlist: string[];
   board_size: number;
   early_size: number;
   live_size: number;
@@ -558,6 +560,7 @@ export function buildRadar(
     model,
     model_version: MODEL_VERSION,
     watchlist_size: shot.watchlist.length,
+    watchlist: [...shot.watchlist],
     board_size: ordered.length,
     early_size: early,
     live_size: live.length,
